@@ -17,18 +17,39 @@ import LoadingOverlay from "../components/LoadingOverlay";
 import { getWorkspaces } from "../services/api";
 import { addSessionData } from "../services/baseHelper";
 import useHardwareBack from "../hooks/useHardwareBack";
-
-
+import NoInternetModal from "../components/NoInternetModal";
+import NetworkErrorModal from "../components/NetworkErrorModal";
+import LocationDisabledModal from "../components/LocationDisabledModal";
+import useInternetStatus from "../hooks/useInternetStatus";
+import { startBackgroundLocation } from "../utils/locationManager";
 
 export default function EmailScreen({ navigation }) {
   useHardwareBack(navigation);
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const isInternetAvailable = useInternetStatus();
+  const [showNoInternet, setShowNoInternet] = useState(false);
+  const [showNetworkError, setShowNetworkError] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const [toast, setToast] = useState({
     visible: false,
     message: "",
     type: "error",
   });
+  useEffect(() => {
+    precheckAndStartLocation();
+  }, []);
+  const precheckAndStartLocation = async () => {
+    if (!isInternetAvailable) {
+      setShowNoInternet(true);
+      return;
+    }
+
+    const ok = await startBackgroundLocation();
+    if (!ok) {
+      setShowLocationModal(true);
+    }
+  };
 
   const showToast = (message, type = "error") => {
     setToast({ visible: true, message, type });
@@ -121,6 +142,28 @@ export default function EmailScreen({ navigation }) {
         type={toast.type}
         onHide={() => setToast((t) => ({ ...t, visible: false }))}
       />
+      <NoInternetModal
+        visible={showNoInternet}
+        onRetry={() => {
+          setShowNoInternet(false);
+          precheckAndStartLocation();
+        }}
+      />
+
+      <NetworkErrorModal
+        visible={showNetworkError}
+        onRetry={() => {
+          setShowNetworkError(false);
+          precheckAndStartLocation();
+        }}
+        onGoHome={() => setShowNetworkError(false)}
+      />
+
+      <LocationDisabledModal
+        visible={showLocationModal}
+        onCancel={() => setShowLocationModal(false)}
+      />
+
     </SafeAreaView>
   );
 }

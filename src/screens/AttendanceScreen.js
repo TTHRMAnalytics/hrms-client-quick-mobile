@@ -1,5 +1,3 @@
-// src/screens/AttendanceScreen.js
-
 import React, { useEffect, useState } from "react";
 import {
   SafeAreaView,
@@ -10,24 +8,17 @@ import {
   Modal,
   Pressable,
   Alert,
-  ActivityIndicator,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { colors, spacing } from "../constants/theme";
-import { addFaceData } from "../services/api";
+import { addFaceData, getEmployeeLastAttendanceStatus } from "../services/api";
 import { getSessionData } from "../services/baseHelper";
 import useHardwareBack from "../hooks/useHardwareBack";
 import useInternetStatus from "../hooks/useInternetStatus";
 import NoInternetModal from "../components/NoInternetModal";
-import LocationDisabledModal from "../components/LocationDisabledModal";
 import NetworkErrorModal from "../components/NetworkErrorModal";
-import {
-  getCurrentLocation,
-  hasLocationPermission,
-  requestLocationPermission,
-  checkLocationEnabled,
-} from "../utils/locationHelper";
+import { getCachedLocation, triggerBackgroundRefresh } from "../utils/locationManager";
+import { InlineLoader } from "../components/LoadingOverlay";
 
 export default function AttendanceScreen({ navigation, route }) {
   useHardwareBack(navigation);
@@ -35,22 +26,44 @@ export default function AttendanceScreen({ navigation, route }) {
   const workspace = route?.params?.workspace || "";
   const isInternetAvailable = useInternetStatus();
 
+  // ---------------- STATE ----------------
   const [employeeId, setEmployeeId] = useState(null);
-  const [attendanceKey, setAttendanceKey] = useState(null);
-
-  // UI-only state (time + date)
+  const [serverStatus, setServerStatus] = useState(null);
   const [checkInTime, setCheckInTime] = useState(null);
   const [checkOutTime, setCheckOutTime] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [showCheckOutModal, setShowCheckOutModal] = useState(false);
-  const [showLocationModal, setShowLocationModal] = useState(false);
   const [showNoInternetModal, setShowNoInternetModal] = useState(false);
   const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false);
-  const [lastActionType, setLastActionType] = useState(null); // "Check In" or "Check Out"
+  const [lastActionType, setLastActionType] = useState(null);
 
-  /* ---------------- HELPERS ---------------- */
+  // ---------------- INIT ----------------
+  useEffect(() => {
+    initEmployee();
+  }, []);
 
+  useEffect(() => {
+    if (employeeId) {
+      loadLastAttendanceStatus();
+    }
+  }, [employeeId]);
+
+  const initEmployee = async () => {
+    const empId =
+      (await getSessionData({ key: "employee_id" })) ||
+      (await getSessionData({ key: "emp_id" }));
+
+    if (!empId) {
+      Alert.alert("Error", "User not found. Please login again.");
+      navigation.goBack();
+      return;
+    }
+
+    setEmployeeId(empId);
+  };
+
+  // ---------------- HELPERS ----------------
   const buildDisplayDateTime = (iso) => {
     const d = new Date(iso);
     return {
@@ -70,83 +83,49 @@ export default function AttendanceScreen({ navigation, route }) {
   const getLocalISOTime = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset();
-    return new Date(now.getTime() - offset * 60000)
-      .toISOString()
-      .slice(0, -1);
+    return new Date(now.getTime() - offset * 60000).toISOString().slice(0, -1);
   };
 
-  const buildAttendanceKey = (empId, workspace) =>
-    `@attendance_state_${empId}_${workspace}`;
-
-  /* ---------------- INIT ---------------- */
-
-  useEffect(() => {
-    init();
-    requestLocationPermission();
-  }, []);
-
-  const init = async () => {
-    const empId =
-      (await getSessionData({ key: "employee_id" })) ||
-      (await getSessionData({ key: "emp_id" }));
-
-    if (!empId) {
-      Alert.alert("Error", "User not found. Please login again.");
-      navigation.goBack();
-      return;
-    }
-
-    setEmployeeId(empId);
-
-    const key = buildAttendanceKey(empId, workspace);
-    setAttendanceKey(key);
-
-    const saved = await AsyncStorage.getItem(key);
-    if (!saved) return;
-
-    const parsed = JSON.parse(saved);
-    if (parsed.checkIn) setCheckInTime(parsed.checkIn);
-    if (parsed.checkOut) setCheckOutTime(parsed.checkOut);
-  };
-
-  const saveAttendance = async (checkIn, checkOut) => {
-    if (!attendanceKey) return;
-    await AsyncStorage.setItem(
-      attendanceKey,
-      JSON.stringify({ checkIn, checkOut })
-    );
-  };
-
-  /* ---------------- LOCATION ---------------- */
-
-  const getGPSLocation = async () => {
+  // ---------------- SERVER STATUS ----------------
+  const loadLastAttendanceStatus = async () => {
     try {
-      const hasPermission = await hasLocationPermission();
-      if (!hasPermission) {
-        setShowLocationModal(true);
-        return null;
+      const domain =
+        (await getSessionData({ key: "domain_name" })) || workspace;
+
+      const res = await getEmployeeLastAttendanceStatus({
+        employeeId,
+        domainName: domain,
+      });
+
+      const status = res?.data || res;
+      setServerStatus(status);
+
+      if (status?.last_action === "Check In" && status?.check_in_time) {
+        setCheckInTime(buildDisplayDateTime(status.check_in_time));
+        setCheckOutTime(null);
       }
 
-      const enabled = await checkLocationEnabled();
-      if (!enabled) {
-        setShowLocationModal(true);
-        return null;
+      if (status?.last_action === "Check Out" && status?.check_out_time) {
+        setCheckOutTime(buildDisplayDateTime(status.check_out_time));
       }
-
-      const loc = await getCurrentLocation();
-      return `${loc.latitude},${loc.longitude}`;
     } catch (e) {
-      Alert.alert(
-        "Location Error",
-        "Unable to get your location. Please check GPS and try again."
-      );
-      return null;
+      // quiet fail, optional log
     }
   };
 
+  // ---------------- LOCATION ----------------
+  const waitForLocation = async (maxRetries = 6, delayMs = 1000) => {
+    for (let i = 0; i < maxRetries; i++) {
+      const cached = await getCachedLocation();
+      if (cached) return cached;
 
-  /* ---------------- API ---------------- */
+      triggerBackgroundRefresh();
+      await new Promise((res) => setTimeout(res, delayMs));
+    }
+    return null;
+  };
 
+  // ---------------- API ----------------
   const sendAttendance = async (type) => {
     try {
       if (!isInternetAvailable) {
@@ -156,28 +135,18 @@ export default function AttendanceScreen({ navigation, route }) {
 
       setLoading(true);
 
-      const gps = await getGPSLocation();
-
-      if (!gps) {
+      const cached = await waitForLocation();
+      if (!cached) {
         Alert.alert(
-          "Location Required",
-          "Cannot mark attendance without location."
+          "Unable to get location",
+          "Please ensure location is enabled and try again."
         );
         return null;
       }
 
+      const gps = `${cached.latitude},${cached.longitude}`;
       const domain =
         (await getSessionData({ key: "domain_name" })) || workspace;
-
-      if (!domain) {
-        Alert.alert(
-          "Workspace Error",
-          "Workspace not found. Please login again."
-        );
-        return null;
-      }
-
-
       const recordTime = getLocalISOTime();
 
       const res = await addFaceData({
@@ -196,39 +165,33 @@ export default function AttendanceScreen({ navigation, route }) {
         return null;
       }
 
-      if (
-        e.message !== "LOCATION_PERMISSION_DENIED" &&
-        e.message !== "LOCATION_SERVICES_DISABLED" &&
-        e.message !== "GPS_FETCH_FAILED"
-      ) {
-        Alert.alert("Error", e.message || "Attendance failed");
-      }
+      Alert.alert("Error", e.message || "Attendance failed");
       return null;
     } finally {
       setLoading(false);
     }
   };
 
-  /* ---------------- HANDLERS ---------------- */
-
+  // ---------------- HANDLERS ----------------
   const handleCheckIn = async () => {
     setLastActionType("Check In");
     const iso = await sendAttendance("Check In");
     if (!iso) return;
-    const display = buildDisplayDateTime(iso);
-    setCheckInTime(display);
+
+    setCheckInTime(buildDisplayDateTime(iso));
+    setCheckOutTime(null);
     setShowCheckInModal(true);
-    await saveAttendance(display, checkOutTime);
+    setServerStatus({ last_action: "Check In" });
   };
 
   const handleCheckOut = async () => {
     setLastActionType("Check Out");
     const iso = await sendAttendance("Check Out");
     if (!iso) return;
-    const display = buildDisplayDateTime(iso);
-    setCheckOutTime(display);
+
+    setCheckOutTime(buildDisplayDateTime(iso));
     setShowCheckOutModal(true);
-    await saveAttendance(checkInTime, display);
+    setServerStatus({ last_action: "Check Out" });
   };
 
   const retryLastAction = async () => {
@@ -240,14 +203,18 @@ export default function AttendanceScreen({ navigation, route }) {
     await sendAttendance(lastActionType);
   };
 
-  /* ---------------- UI ---------------- */
+  // ---------------- BUTTON STATES (SERVER ONLY) ----------------
+  const lastAction = serverStatus?.last_action;
+  const isCheckInDisabled = lastAction === "Check In";
+  const isCheckOutDisabled = lastAction !== "Check In";
 
+  // ---------------- UI ----------------
   return (
     <SafeAreaView style={styles.root}>
+      {/* Centered loader over entire screen */}
       {loading && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color={colors.accent} />
-          <Text style={styles.loadingText}>Recording attendance…</Text>
+        <View style={styles.centerLoader}>
+          <InlineLoader visible={true} size={40} />
         </View>
       )}
 
@@ -260,7 +227,7 @@ export default function AttendanceScreen({ navigation, route }) {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Main Card */}
+      {/* Main card */}
       <View style={styles.card}>
         <View style={styles.iconContainer}>
           <Icon name="finger-print" size={80} color={colors.accent} />
@@ -294,38 +261,31 @@ export default function AttendanceScreen({ navigation, route }) {
 
         <View style={styles.buttonsContainer}>
           <TouchableOpacity
-            style={styles.checkInButton}
+            style={[styles.checkInButton, isCheckInDisabled && { opacity: 0.4 }]}
             onPress={handleCheckIn}
-            activeOpacity={0.8}
+            disabled={isCheckInDisabled}
           >
             <Text style={styles.checkInText}>CHECK IN</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.checkOutButton}
+            style={[
+              styles.checkOutButton,
+              isCheckOutDisabled && { opacity: 0.4 },
+            ]}
             onPress={handleCheckOut}
-            activeOpacity={0.8}
+            disabled={isCheckOutDisabled}
           >
             <Text style={styles.checkOutText}>CHECK OUT</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Location Disabled Modal */}
-      <LocationDisabledModal
-        visible={showLocationModal}
-        onCancel={() => setShowLocationModal(false)}
-      />
-
-      {/* No Internet Modal (pure offline, before request) */}
       <NoInternetModal
         visible={showNoInternetModal}
-        onRetry={() => {
-          setShowNoInternetModal(false);
-        }}
+        onRetry={() => setShowNoInternetModal(false)}
       />
 
-      {/* Network Error Modal (fetch failed) */}
       <NetworkErrorModal
         visible={showNetworkErrorModal}
         onRetry={retryLastAction}
@@ -336,55 +296,33 @@ export default function AttendanceScreen({ navigation, route }) {
       />
 
       {/* Check In Modal */}
-      <Modal
-        visible={showCheckInModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowCheckInModal(false)}
-      >
+      <Modal visible={showCheckInModal} transparent animationType="fade">
         <Pressable
           style={styles.modalBackdrop}
           onPress={() => setShowCheckInModal(false)}
         >
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={styles.modalCard}>
             <Icon name="checkmark-circle" size={60} color={colors.accent} />
             <Text style={styles.modalTitle}>Check In Confirmed!</Text>
             <Text style={styles.modalMessage}>
-              You have successfully checked in at {checkInTime?.time}
+              You checked in at {checkInTime?.time}
             </Text>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => setShowCheckInModal(false)}
-            >
-              <Text style={styles.modalButtonText}>OK</Text>
-            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
 
       {/* Check Out Modal */}
-      <Modal
-        visible={showCheckOutModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowCheckOutModal(false)}
-      >
+      <Modal visible={showCheckOutModal} transparent animationType="fade">
         <Pressable
           style={styles.modalBackdrop}
           onPress={() => setShowCheckOutModal(false)}
         >
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+          <Pressable style={styles.modalCard}>
             <Icon name="checkmark-circle" size={60} color={colors.accent} />
             <Text style={styles.modalTitle}>Check Out Confirmed!</Text>
             <Text style={styles.modalMessage}>
-              You have successfully checked out at {checkOutTime?.time}
+              You checked out at {checkOutTime?.time}
             </Text>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => setShowCheckOutModal(false)}
-            >
-              <Text style={styles.modalButtonText}>OK</Text>
-            </TouchableOpacity>
           </Pressable>
         </Pressable>
       </Modal>
@@ -392,29 +330,23 @@ export default function AttendanceScreen({ navigation, route }) {
   );
 }
 
-/* ---------------- STYLES ---------------- */
-
+// ---------------- STYLES ----------------
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.85)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
-  },
-  loadingText: { color: "#fff", marginTop: 12 },
   header: {
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "space-between",
     padding: spacing.lg,
+    paddingTop: 48,
+    paddingBottom: spacing.lg,
   },
-  headerTitle: {
-    color: "#fff",
-    fontSize: 20,
-    fontWeight: "700",
+  centerLoader: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 20,
   },
+  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
   card: {
     flex: 1,
     margin: spacing.lg,
@@ -433,14 +365,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.xl,
   },
-  timeContainer: {
-    width: "100%",
-    gap: spacing.md,
-    marginBottom: spacing.xl,
-  },
+  timeContainer: { width: "100%", gap: spacing.md },
   timeCard: {
     flexDirection: "row",
-    alignItems: "center",
     backgroundColor: "#1a1a1a",
     padding: spacing.md,
     borderRadius: 16,
@@ -450,11 +377,7 @@ const styles = StyleSheet.create({
   timeLabel: { color: "#888", fontSize: 12 },
   timeValue: { color: "#fff", fontSize: 18, fontWeight: "700" },
   timeDate: { color: "#aaa", fontSize: 12 },
-  buttonsContainer: {
-    width: "100%",
-    marginTop: "auto",
-    gap: spacing.md,
-  },
+  buttonsContainer: { width: "100%", marginTop: "auto", gap: spacing.md },
   checkInButton: {
     backgroundColor: colors.accent,
     paddingVertical: 16,
@@ -491,23 +414,10 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "700",
     marginTop: spacing.md,
-    marginBottom: spacing.sm,
   },
   modalMessage: {
     color: "#aaa",
     fontSize: 15,
-    textAlign: "center",
-    marginBottom: spacing.lg,
-  },
-  modalButton: {
-    backgroundColor: colors.accent,
-    paddingHorizontal: 40,
-    paddingVertical: 12,
-    borderRadius: 20,
-  },
-  modalButtonText: {
-    color: "#000",
-    fontSize: 16,
-    fontWeight: "700",
+    marginTop: spacing.sm,
   },
 });

@@ -12,10 +12,6 @@ export const removeSessionData = async ({ key }) => {
   await AsyncStorage.removeItem(key);
 };
 
-/**
- * Clears ONLY session-related data
- * ❌ Does NOT clear saved_email
- */
 export const clearSessionData = async () => {
   await AsyncStorage.multiRemove([
     "user_id",

@@ -16,9 +16,9 @@ import CustomInput from "../components/CustomInput";
 import CustomButton from "../components/CustomButton";
 import CustomToast from "../components/CustomToast";
 import LoadingOverlay from "../components/LoadingOverlay";
-import NoInternetModal from "../components/NoInternetModal";          // ✅ added
-import NetworkErrorModal from "../components/NetworkErrorModal";      // ✅ added
-import useInternetStatus from "../hooks/useInternetStatus";           // ✅ added
+import NoInternetModal from "../components/NoInternetModal";          //  added
+import NetworkErrorModal from "../components/NetworkErrorModal";      //  added
+import useInternetStatus from "../hooks/useInternetStatus";           //  added
 import { signIn, getuserinfo } from "../services/api";
 import { addSessionData, getSessionData } from "../services/baseHelper";
 
@@ -50,9 +50,9 @@ export default function PasswordScreen({ navigation, route }) {
     type: "error",
   });
 
-  const isInternetAvailable = useInternetStatus();                    // ✅ added
-  const [showNoInternetModal, setShowNoInternetModal] = useState(false);   // ✅ added
-  const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false); // ✅ added
+  const isInternetAvailable = useInternetStatus();                    //  added
+  const [showNoInternetModal, setShowNoInternetModal] = useState(false);   //  added
+  const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false); //  added
 
   const handleSignIn = async () => {
     if (!password.trim()) {
@@ -64,7 +64,7 @@ export default function PasswordScreen({ navigation, route }) {
       return;
     }
 
-    if (!isInternetAvailable) {                                       // ✅ offline -> modal
+    if (!isInternetAvailable) {                                       //  offline -> modal
       setShowNoInternetModal(true);
       return;
     }
@@ -155,7 +155,7 @@ export default function PasswordScreen({ navigation, route }) {
       });
     } catch (err) {
       console.error("  Login error:", err);
-      if (err?.message === "Network request failed") {               // ✅ network failure -> modal
+      if (err?.message === "Network request failed") {               //  network failure -> modal
         setShowNetworkErrorModal(true);
       } else {
         setToast({
@@ -228,17 +228,13 @@ export default function PasswordScreen({ navigation, route }) {
           </TouchableOpacity>
         )}
 
+        {/* Forgot Password Link
         <TouchableOpacity
-          onPress={() =>
-            setToast({
-              visible: true,
-              message: "Password recovery is not implemented.",
-              type: "info",
-            })
-          }
+          onPress={() => navigation.navigate("ForgotPassword")}
         >
           <Text style={styles.forgotLink}>Forgot password?</Text>
-        </TouchableOpacity>
+        </TouchableOpacity>*/}
+
       </View>
 
       <LoadingOverlay visible={loading} />
@@ -249,7 +245,7 @@ export default function PasswordScreen({ navigation, route }) {
         onHide={() => setToast((t) => ({ ...t, visible: false }))}
       />
 
-      {/* ✅ No Internet Modal */}
+      {/*  No Internet Modal */}
       <NoInternetModal
         visible={showNoInternetModal}
         onRetry={() => {
@@ -258,7 +254,7 @@ export default function PasswordScreen({ navigation, route }) {
         }}
       />
 
-      {/* ✅ Network Error Modal */}
+      {/*  Network Error Modal */}
       <NetworkErrorModal
         visible={showNetworkErrorModal}
         onRetry={() => {
@@ -299,7 +295,7 @@ const styles = StyleSheet.create({
   backButton: {
     position: "absolute",
     left: 22,
-    top: 22,
+    top: 48,
     padding: 6,
   },
   card: {

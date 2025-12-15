@@ -24,7 +24,6 @@ export default function AuthNavigator() {
       <Stack.Screen name="Attendance" component={AttendanceScreen} />
       <Stack.Screen name="Welcome" component={WelcomeScreen} />
 
-
     </Stack.Navigator>
   );
 }

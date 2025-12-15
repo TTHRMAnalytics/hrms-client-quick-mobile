@@ -4,7 +4,7 @@ import Config from "react-native-config";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const BASE_URL = Config.HRMS_UTILITY_API_URL;
-const HRMS_SECRET =Config.HRMS_BEARER_SECRET;
+const HRMS_SECRET ="MEEPL_BEARER_TOKEN_OAUTH_HRMS_UTILITY_API_SECRET";
 
 // In-memory cache so we don't hit AsyncStorage every time
 let inMemoryToken = null;

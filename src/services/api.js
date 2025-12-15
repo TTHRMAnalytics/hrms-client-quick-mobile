@@ -4,8 +4,6 @@ import { getHrmsBearerToken, generateHrmsBearerToken } from "./hrmsAuth";
 import { encryptPassword } from "../utils/crypto";
 
 const BASE_URL = Config.HRMS_UTILITY_API_URL;
-console.log("BASE_URL", BASE_URL);
-
 // generic request with HRMS bearer + 401 retry
 async function request(path, options = {}, retry = true) {
   const token = await getHrmsBearerToken();
@@ -107,7 +105,6 @@ export async function getuserinfo({ userId, domain }) {
 
 // --------- ðŸ”¥ NEW: Attendance API Functions ----------
 const LMS_BASE_URL = Config.HRMS_LMS_API_URL;
-console.log("LMS_BASE_URL",LMS_BASE_URL);
 // Helper for LMS API calls (different base URL)
 async function lmsRequest(path, options = {}, retry = true) {
   const token = await getHrmsBearerToken();
@@ -177,7 +174,7 @@ export async function addFaceData({ employeeId, recordTime, entryType, domainNam
     emp_id: employeeId,
     record_time: recordTime,
     entry_type: entryType,
-    live_location: liveLocation || null,  // âœ… ADD THIS FIELD
+    live_location: liveLocation,
   };
 
 
@@ -244,4 +241,17 @@ export async function addDistanceLog({ empId, name, distance }) {
     // Don't throw - this is optional logging
     return null;
   }
+}
+
+// Get last attendance status for employee
+export async function getEmployeeLastAttendanceStatus({ employeeId, domainName }) {
+  const res = await lmsRequest("/getEmpLastAttendanceStatus", {
+    method: "POST",
+    body: JSON.stringify({
+      domain_name: domainName,
+      employee_id: employeeId,
+    }),
+  });
+
+  return res;
 }

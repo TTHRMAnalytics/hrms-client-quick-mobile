@@ -171,9 +171,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#000",
   },
   headerContainer: {
-    paddingTop: spacing.lg,
+    paddingTop: spacing.xl,
     paddingHorizontal: spacing.lg,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
     position: "relative",
   },
   header: {
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
   logoutIconButton: {
     position: "absolute",
     right: spacing.lg,
-    top: spacing.lg,
+    top: 68,
     padding: 8,
     backgroundColor: "#1a1a1a",
     borderRadius: 12,
@@ -202,6 +202,7 @@ const styles = StyleSheet.create({
   },
   welcomeCard: {
     marginHorizontal: spacing.lg,
+    marginTop: spacing.lg,
     backgroundColor: "#111",
     borderRadius: 20,
     padding: spacing.lg,

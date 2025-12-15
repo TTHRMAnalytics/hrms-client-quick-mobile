@@ -10,10 +10,16 @@ import {
   TouchableOpacity,
   Image,
 } from "react-native";
-import Icon from "react-native-vector-icons/Ionicons";          // ✅ already used elsewhere in project
+import Icon from "react-native-vector-icons/Ionicons";          //  already used elsewhere in project
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { colors, spacing } from "../constants/theme";
 import ConfirmSwitchAccountModal from "../components/ConfirmSwitchAccountModal";
+import NoInternetModal from "../components/NoInternetModal";
+import NetworkErrorModal from "../components/NetworkErrorModal";
+import LocationDisabledModal from "../components/LocationDisabledModal";
+import useInternetStatus from "../hooks/useInternetStatus";
+import { startBackgroundLocation } from "../utils/locationManager";
+
 import {
   getSessionData,
   removeSessionData,
@@ -25,11 +31,29 @@ export default function WelcomeScreen({ navigation }) {
 
   const [email, setEmail] = useState("");
   const [showSwitchModal, setShowSwitchModal] = useState(false);
+  const isInternetAvailable = useInternetStatus();
+  const [showNoInternet, setShowNoInternet] = useState(false);
+  const [showNetworkError, setShowNetworkError] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
 
   /* ---------- load saved email ---------- */
   useEffect(() => {
     loadSavedEmail();
+    precheckAndStartLocation();
   }, []);
+
+  const precheckAndStartLocation = async () => {
+    if (!isInternetAvailable) {
+      setShowNoInternet(true);
+      return;
+    }
+
+    const ok = await startBackgroundLocation();
+    if (!ok) {
+      setShowLocationModal(true);
+    }
+  };
+
 
   const loadSavedEmail = async () => {
     const savedEmail = await getSessionData({ key: "saved_email" });
@@ -115,6 +139,28 @@ export default function WelcomeScreen({ navigation }) {
         onCancel={() => setShowSwitchModal(false)}
         onConfirm={confirmSwitchAccount}
       />
+      <NoInternetModal
+        visible={showNoInternet}
+        onRetry={() => {
+          setShowNoInternet(false);
+          precheckAndStartLocation();
+        }}
+      />
+
+      <NetworkErrorModal
+        visible={showNetworkError}
+        onRetry={() => {
+          setShowNetworkError(false);
+          precheckAndStartLocation();
+        }}
+        onGoHome={() => setShowNetworkError(false)}
+      />
+
+      <LocationDisabledModal
+        visible={showLocationModal}
+        onCancel={() => setShowLocationModal(false)}
+      />
+
     </SafeAreaView>
   );
 }

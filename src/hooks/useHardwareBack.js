@@ -11,13 +11,13 @@ export default function useHardwareBack(navigation) {
       return false; // allow app to exit if no screen to go back
     };
 
-    // ✅ MODERN API (IMPORTANT)
+    //  MODERN API (IMPORTANT)
     const subscription = BackHandler.addEventListener(
       "hardwareBackPress",
       onBackPress
     );
 
-    // ✅ CLEANUP (THIS FIXES YOUR ERROR)
+    //  CLEANUP (THIS FIXES YOUR ERROR)
     return () => subscription.remove();
   }, [navigation]);
 }
