@@ -15,11 +15,11 @@ import { colors, spacing } from "../constants/theme";
 import CustomButton from "../components/CustomButton";
 import CustomToast from "../components/CustomToast";
 import LoadingOverlay from "../components/LoadingOverlay";
-import NoInternetModal from "../components/NoInternetModal";          //  added
-import NetworkErrorModal from "../components/NetworkErrorModal";      //  added
-import useInternetStatus from "../hooks/useInternetStatus";           //  added
+import NoInternetModal from "../components/NoInternetModal";          // ✅ added
+import NetworkErrorModal from "../components/NetworkErrorModal";      // ✅ added
+import useInternetStatus from "../hooks/useInternetStatus";           // ✅ added
 import { getSessionData } from "../services/baseHelper";
-import { getWorkspaces, getErrorMessage } from "../services/api";     //  getErrorMessage
+import { getWorkspaces, getErrorMessage } from "../services/api";     // ✅ getErrorMessage
 
 /* ---------- helper ---------- */
 function getWorkspaceName(item) {
@@ -49,9 +49,9 @@ export default function WorkspaceScreen({ navigation }) {
     type: "error",
   });
 
-  const isInternetAvailable = useInternetStatus();                    //  added
-  const [showNoInternetModal, setShowNoInternetModal] = useState(false);   //  added
-  const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false); //  added
+  const isInternetAvailable = useInternetStatus();                    // ✅ added
+  const [showNoInternetModal, setShowNoInternetModal] = useState(false);   // ✅ added
+  const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false); // ✅ added
 
   /* ---------- load email + workspaces ---------- */
   useEffect(() => {
@@ -63,7 +63,7 @@ export default function WorkspaceScreen({ navigation }) {
       const savedEmail = await getSessionData({ key: "saved_email" });
 
       if (!savedEmail) {
-        navigation.replace("EmailScreen");
+        navigation.replace("Email");
         return;
       }
 
@@ -76,7 +76,7 @@ export default function WorkspaceScreen({ navigation }) {
 
   const fetchWorkspaces = async (email) => {
     try {
-      if (!isInternetAvailable) {                                    //  offline -> show modal
+      if (!isInternetAvailable) {                                    // ✅ offline -> show modal
         setShowNoInternetModal(true);
         return;
       }
@@ -91,7 +91,7 @@ export default function WorkspaceScreen({ navigation }) {
         setSelected(getWorkspaceName(list[0]));
       }
     } catch (e) {
-      if (e?.message === "Network request failed") {                 //  network failure -> modal
+      if (e?.message === "Network request failed") {                 // ✅ network failure -> modal
         setShowNetworkErrorModal(true);
         return;
       }
@@ -119,6 +119,7 @@ export default function WorkspaceScreen({ navigation }) {
   /* ---------- UI ---------- */
   return (
     <SafeAreaView style={styles.root}>
+      <LoadingOverlay visible={loading} />
       {/* Header */}
       <View style={styles.header}>
         <Image
@@ -186,9 +187,7 @@ export default function WorkspaceScreen({ navigation }) {
         onHide={() => setToast((t) => ({ ...t, visible: false }))}
       />
 
-      <LoadingOverlay visible={loading} />
-
-      {/*  No Internet Modal */}
+      {/* ✅ No Internet Modal */}
       <NoInternetModal
         visible={showNoInternetModal}
         onRetry={() => {
@@ -197,7 +196,7 @@ export default function WorkspaceScreen({ navigation }) {
         }}
       />
 
-      {/*  Network Error Modal */}
+      {/* ✅ Network Error Modal */}
       <NetworkErrorModal
         visible={showNetworkErrorModal}
         onRetry={() => {

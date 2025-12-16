@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   SafeAreaView,
   StyleSheet,
@@ -8,59 +8,285 @@ import {
   Modal,
   Pressable,
   Alert,
+  BackHandler,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
+
 import { colors, spacing } from "../constants/theme";
-import { addFaceData, getEmployeeLastAttendanceStatus } from "../services/api";
-import { getSessionData } from "../services/baseHelper";
-import useHardwareBack from "../hooks/useHardwareBack";
-import useInternetStatus from "../hooks/useInternetStatus";
+import { addFaceData, getEmployeeLastAttendanceStatus, getFaceData } from "../services/api";
+
+import {
+  getSessionData,
+  saveAttendanceState,
+  getAttendanceState
+} from "../services/baseHelper";
+
 import NoInternetModal from "../components/NoInternetModal";
 import NetworkErrorModal from "../components/NetworkErrorModal";
-import { getCachedLocation, triggerBackgroundRefresh } from "../utils/locationManager";
 import { InlineLoader } from "../components/LoadingOverlay";
 
+import {
+  getCachedLocation,
+  triggerBackgroundRefresh,
+} from "../utils/locationManager";
+
+// ✅ Import NetInfo directly instead of custom hook
+import NetInfo from "@react-native-community/netinfo";
+
 export default function AttendanceScreen({ navigation, route }) {
-  useHardwareBack(navigation);
+  // ============================================
+  // ✅ ALL HOOKS MUST BE AT THE VERY TOP - NO EXCEPTIONS
+  // ============================================
 
-  const workspace = route?.params?.workspace || "";
-  const isInternetAvailable = useInternetStatus();
-
-  // ---------------- STATE ----------------
+  // State hooks
   const [employeeId, setEmployeeId] = useState(null);
-  const [serverStatus, setServerStatus] = useState(null);
+  const [lastAction, setLastAction] = useState(null);
   const [checkInTime, setCheckInTime] = useState(null);
   const [checkOutTime, setCheckOutTime] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [showCheckInModal, setShowCheckInModal] = useState(false);
   const [showCheckOutModal, setShowCheckOutModal] = useState(false);
   const [showNoInternetModal, setShowNoInternetModal] = useState(false);
   const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false);
   const [lastActionType, setLastActionType] = useState(null);
+  const [isInternetAvailable, setIsInternetAvailable] = useState(true);
 
-  // ---------------- INIT ----------------
+  // Ref hooks
+  const hasInitialized = useRef(false);
+
+  // ✅ Internet status effect (replaces useInternetStatus hook)
   useEffect(() => {
-    initEmployee();
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const connected = state.isConnected === true && state.isInternetReachable !== false;
+      setIsInternetAvailable(connected);
+    });
+
+    return () => unsubscribe();
   }, []);
 
+  // ✅ Back button handler effect
   useEffect(() => {
-    if (employeeId) {
-      loadLastAttendanceStatus();
+    const backHandler = BackHandler.addEventListener(
+      "hardwareBackPress",
+      () => {
+        navigation.goBack();
+        return true;
+      }
+    );
+
+    return () => backHandler.remove();
+  }, []);
+
+  // ✅ Init effect (runs only once)
+  useEffect(() => {
+    if (!hasInitialized.current) {
+      hasInitialized.current = true;
+      initScreen();
     }
-  }, [employeeId]);
 
-  const initEmployee = async () => {
-    const empId =
-      (await getSessionData({ key: "employee_id" })) ||
-      (await getSessionData({ key: "emp_id" }));
+    return () => {
+      hasInitialized.current = false;
+    };
+  }, []);
 
-    if (!empId) {
-      Alert.alert("Error", "User not found. Please login again.");
-      navigation.goBack();
-      return;
+  // ============================================
+  // NOW SAFE TO USE REGULAR VARIABLES AND FUNCTIONS
+  // ============================================
+
+  const workspace = route?.params?.workspace || "";
+
+  // ---------------- INIT ----------------
+  const initScreen = async () => {
+    try {
+      setInitialLoading(true);
+
+      const empId =
+        (await getSessionData({ key: "employee_id" })) ||
+        (await getSessionData({ key: "emp_id" }));
+
+      if (!empId) {
+        Alert.alert("Error", "User not found. Please login again.");
+        navigation.goBack();
+        return;
+      }
+
+      setEmployeeId(empId);
+
+      console.log("📂 Loading cached attendance state...");
+      const cached = await getAttendanceState({ employeeId: empId });
+
+      if (cached && cached.last_action) {
+        console.log("✅ Loaded from cache:", cached);
+        setLastAction(cached.last_action);
+
+        if (cached.check_in_time) {
+          setCheckInTime(buildDisplayDateTime(cached.check_in_time));
+        }
+        if (cached.check_out_time) {
+          setCheckOutTime(buildDisplayDateTime(cached.check_out_time));
+        }
+      }
+
+      console.log("🔄 Syncing with server...");
+      await syncWithServer(empId);
+
+    } catch (e) {
+      console.error("❌ Init failed:", e);
+    } finally {
+      setInitialLoading(false);
     }
+  };
 
-    setEmployeeId(empId);
+  // ---------------- SERVER SYNC ----------------
+  const syncWithServer = async (empId) => {
+    try {
+      const domain =
+        (await getSessionData({ key: "domain_name" })) || workspace;
+
+      console.log("🔄 Syncing with server...");
+
+      // ✅ Try getFaceData first (has timestamps)
+      let res;
+      let useFallback = false;
+
+      try {
+        const today = new Date().toISOString().split('T')[0];
+
+        console.log("🔄 Trying getFaceData...");
+        res = await getFaceData({
+          fromDate: today,
+          toDate: today,
+          empId: empId,
+          domainName: domain,
+        });
+
+        console.log("🔍 Server Response from getFaceData:", JSON.stringify(res, null, 2));
+
+        // Check if response is valid
+        if (res?.statuscode === "500" || res?.status === "failed") {
+          console.log("⚠️ getFaceData failed, using fallback");
+          useFallback = true;
+        }
+      } catch (e) {
+        console.log("⚠️ getFaceData error, using fallback:", e.message);
+        useFallback = true;
+      }
+
+      // ✅ Fallback to getEmployeeLastAttendanceStatus (no timestamps but works)
+      if (useFallback) {
+        console.log("🔄 Using fallback: getEmployeeLastAttendanceStatus");
+        res = await getEmployeeLastAttendanceStatus({
+          employeeId: empId,
+          domainName: domain,
+        });
+        console.log("🔍 Server Response (fallback):", JSON.stringify(res, null, 2));
+      }
+
+      // Parse response based on which API was used
+      let serverLastAction = null;
+      let serverCheckInTime = null;
+      let serverCheckOutTime = null;
+
+      if (useFallback) {
+        // Parse getEmployeeLastAttendanceStatus response
+        const statusArray = res?.data;
+        const status = Array.isArray(statusArray) ? statusArray[0] : statusArray;
+
+        serverLastAction =
+          status?.fn_get_last_attendance_status ||
+          status?.last_action ||
+          null;
+
+        console.log("📊 Parsed Server Data (fallback):", { serverLastAction });
+
+      } else {
+        // Parse getFaceData response
+        const attendanceData = res?.data || [];
+        const latestRecord = Array.isArray(attendanceData) && attendanceData.length > 0
+          ? attendanceData[attendanceData.length - 1]
+          : null;
+
+        if (latestRecord) {
+          serverCheckInTime =
+            latestRecord.check_in_time ||
+            latestRecord.checkInTime ||
+            latestRecord.record_time ||
+            null;
+
+          serverCheckOutTime =
+            latestRecord.check_out_time ||
+            latestRecord.checkOutTime ||
+            null;
+
+          // Determine action based on timestamps
+          if (serverCheckOutTime) {
+            serverLastAction = "Check Out";
+          } else if (serverCheckInTime) {
+            serverLastAction = "Check In";
+          }
+
+          console.log("📊 Parsed Server Data (getFaceData):", {
+            serverLastAction,
+            serverCheckInTime,
+            serverCheckOutTime,
+          });
+        }
+      }
+
+      // Get existing cache
+      const existingCache = await getAttendanceState({ employeeId: empId });
+      console.log("📦 Existing Cache:", existingCache);
+
+      // Smart merge
+      let finalCheckInTime = serverCheckInTime || existingCache?.check_in_time || null;
+      let finalCheckOutTime = serverCheckOutTime || existingCache?.check_out_time || null;
+
+      console.log("🔄 Merge Result:", {
+        finalCheckInTime,
+        finalCheckOutTime,
+        source: serverCheckInTime ? "server" : "cache",
+      });
+
+      // Update state
+      setLastAction(serverLastAction);
+
+      if (serverLastAction === "Check In") {
+        if (finalCheckInTime) {
+          setCheckInTime(buildDisplayDateTime(finalCheckInTime));
+        }
+        setCheckOutTime(null);
+        finalCheckOutTime = null;
+
+      } else if (serverLastAction === "Check Out") {
+        if (finalCheckOutTime) {
+          setCheckOutTime(buildDisplayDateTime(finalCheckOutTime));
+        }
+        if (finalCheckInTime) {
+          setCheckInTime(buildDisplayDateTime(finalCheckInTime));
+        }
+      } else {
+        if (!existingCache?.last_action) {
+          setCheckInTime(null);
+          setCheckOutTime(null);
+          finalCheckInTime = null;
+          finalCheckOutTime = null;
+        }
+      }
+
+      // Save to cache
+      await saveAttendanceState({
+        employeeId: empId,
+        lastAction: serverLastAction,
+        checkInTime: finalCheckInTime,
+        checkOutTime: finalCheckOutTime,
+      });
+
+      console.log("✅ Synced with server and updated cache");
+
+    } catch (e) {
+      console.error("❌ Server sync failed:", e);
+    }
   };
 
   // ---------------- HELPERS ----------------
@@ -83,34 +309,9 @@ export default function AttendanceScreen({ navigation, route }) {
   const getLocalISOTime = () => {
     const now = new Date();
     const offset = now.getTimezoneOffset();
-    return new Date(now.getTime() - offset * 60000).toISOString().slice(0, -1);
-  };
-
-  // ---------------- SERVER STATUS ----------------
-  const loadLastAttendanceStatus = async () => {
-    try {
-      const domain =
-        (await getSessionData({ key: "domain_name" })) || workspace;
-
-      const res = await getEmployeeLastAttendanceStatus({
-        employeeId,
-        domainName: domain,
-      });
-
-      const status = res?.data || res;
-      setServerStatus(status);
-
-      if (status?.last_action === "Check In" && status?.check_in_time) {
-        setCheckInTime(buildDisplayDateTime(status.check_in_time));
-        setCheckOutTime(null);
-      }
-
-      if (status?.last_action === "Check Out" && status?.check_out_time) {
-        setCheckOutTime(buildDisplayDateTime(status.check_out_time));
-      }
-    } catch (e) {
-      // quiet fail, optional log
-    }
+    return new Date(now.getTime() - offset * 60000)
+      .toISOString()
+      .slice(0, -1);
   };
 
   // ---------------- LOCATION ----------------
@@ -147,19 +348,34 @@ export default function AttendanceScreen({ navigation, route }) {
       const gps = `${cached.latitude},${cached.longitude}`;
       const domain =
         (await getSessionData({ key: "domain_name" })) || workspace;
+
       const recordTime = getLocalISOTime();
 
-      const res = await addFaceData({
+      console.log(`📤 Sending ${type} to server...`);
+
+      // ✅ Log the exact payload being sent
+      const payload = {
         employeeId,
         recordTime,
         entryType: type,
         domainName: domain,
         userId: employeeId,
         liveLocation: gps,
-      });
+      };
+      console.log("📦 Payload:", JSON.stringify(payload, null, 2));
 
-      return res?.data?.record_time || res?.record_time || recordTime;
+      const res = await addFaceData(payload);
+
+      console.log(`✅ ${type} successful!`);
+      console.log("📥 Server Response:", JSON.stringify(res, null, 2));
+
+      const returnedTime = res?.data?.record_time || res?.record_time || recordTime;
+      console.log("⏰ Using timestamp:", returnedTime);
+
+      return returnedTime;
     } catch (e) {
+      console.error(`❌ ${type} failed:`, e);
+
       if (e.message === "Network request failed") {
         setShowNetworkErrorModal(true);
         return null;
@@ -172,53 +388,106 @@ export default function AttendanceScreen({ navigation, route }) {
     }
   };
 
+
   // ---------------- HANDLERS ----------------
   const handleCheckIn = async () => {
+    console.log("🟢 CHECK IN button pressed");
+
     setLastActionType("Check In");
     const iso = await sendAttendance("Check In");
-    if (!iso) return;
 
-    setCheckInTime(buildDisplayDateTime(iso));
+    if (!iso) {
+      console.log("❌ Check In failed");
+      return;
+    }
+
+    const displayTime = buildDisplayDateTime(iso);
+    setCheckInTime(displayTime);
     setCheckOutTime(null);
+    setLastAction("Check In");
+
+    // ✅ Save with actual ISO timestamp
+    await saveAttendanceState({
+      employeeId,
+      lastAction: "Check In",
+      checkInTime: iso, // ✅ This is the ISO string
+      checkOutTime: null,
+    });
+
+    console.log("✅ Check In completed at", displayTime.time);
     setShowCheckInModal(true);
-    setServerStatus({ last_action: "Check In" });
   };
 
   const handleCheckOut = async () => {
+    console.log("🔴 CHECK OUT button pressed");
+
     setLastActionType("Check Out");
     const iso = await sendAttendance("Check Out");
-    if (!iso) return;
 
-    setCheckOutTime(buildDisplayDateTime(iso));
+    if (!iso) {
+      console.log("❌ Check Out failed");
+      return;
+    }
+
+    const displayTime = buildDisplayDateTime(iso);
+    setCheckOutTime(displayTime);
+    setLastAction("Check Out");
+
+    // ✅ Get existing cache to preserve check-in time
+    const existingCache = await getAttendanceState({ employeeId });
+    const checkInISO = existingCache?.check_in_time || new Date().toISOString();
+
+    await saveAttendanceState({
+      employeeId,
+      lastAction: "Check Out",
+      checkInTime: checkInISO, // ✅ Preserve check-in time
+      checkOutTime: iso, // ✅ New check-out time
+    });
+
+    console.log("✅ Check Out completed at", displayTime.time);
     setShowCheckOutModal(true);
-    setServerStatus({ last_action: "Check Out" });
   };
+
 
   const retryLastAction = async () => {
     if (!lastActionType) {
       setShowNetworkErrorModal(false);
       return;
     }
+
+    console.log(`🔄 Retrying ${lastActionType}...`);
     setShowNetworkErrorModal(false);
-    await sendAttendance(lastActionType);
+
+    if (lastActionType === "Check In") {
+      await handleCheckIn();
+    } else {
+      await handleCheckOut();
+    }
   };
 
-  // ---------------- BUTTON STATES (SERVER ONLY) ----------------
-  const lastAction = serverStatus?.last_action;
+  // ---------------- BUTTON STATES ----------------
   const isCheckInDisabled = lastAction === "Check In";
   const isCheckOutDisabled = lastAction !== "Check In";
 
   // ---------------- UI ----------------
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.root}>
+        <View style={styles.centerLoader}>
+          <InlineLoader size={45} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.root}>
-      {/* Centered loader over entire screen */}
       {loading && (
         <View style={styles.centerLoader}>
-          <InlineLoader visible={true} size={40} />
+          <InlineLoader size={45} />
         </View>
       )}
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Icon name="arrow-back" size={24} color="#fff" />
@@ -227,7 +496,6 @@ export default function AttendanceScreen({ navigation, route }) {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* Main card */}
       <View style={styles.card}>
         <View style={styles.iconContainer}>
           <Icon name="finger-print" size={80} color={colors.accent} />
@@ -261,7 +529,10 @@ export default function AttendanceScreen({ navigation, route }) {
 
         <View style={styles.buttonsContainer}>
           <TouchableOpacity
-            style={[styles.checkInButton, isCheckInDisabled && { opacity: 0.4 }]}
+            style={[
+              styles.checkInButton,
+              isCheckInDisabled && { opacity: 0.4 },
+            ]}
             onPress={handleCheckIn}
             disabled={isCheckInDisabled}
           >
@@ -295,7 +566,6 @@ export default function AttendanceScreen({ navigation, route }) {
         }}
       />
 
-      {/* Check In Modal */}
       <Modal visible={showCheckInModal} transparent animationType="fade">
         <Pressable
           style={styles.modalBackdrop}
@@ -311,7 +581,6 @@ export default function AttendanceScreen({ navigation, route }) {
         </Pressable>
       </Modal>
 
-      {/* Check Out Modal */}
       <Modal visible={showCheckOutModal} transparent animationType="fade">
         <Pressable
           style={styles.modalBackdrop}
@@ -330,23 +599,23 @@ export default function AttendanceScreen({ navigation, route }) {
   );
 }
 
-// ---------------- STYLES ----------------
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     padding: spacing.lg,
     paddingTop: 48,
-    paddingBottom: spacing.lg,
   },
+  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
   centerLoader: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 20,
+    zIndex: 50,
+    backgroundColor: "rgba(0,0,0,0.7)",
   },
-  headerTitle: { color: "#fff", fontSize: 20, fontWeight: "700" },
   card: {
     flex: 1,
     margin: spacing.lg,
@@ -365,7 +634,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.xl,
   },
-  timeContainer: { width: "100%", gap: spacing.md },
+  timeContainer: { width: "100%", gap: spacing.md, marginBottom: spacing.lg },
   timeCard: {
     flexDirection: "row",
     backgroundColor: "#1a1a1a",
