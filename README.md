@@ -1,3 +1,6 @@
+MYAPP_UPLOAD_STORE_PASSWORD=admin@meepl1234
+MYAPP_UPLOAD_KEY_PASSWORD=admin@meepl1234
+
 <<<<<<< HEAD
 This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
 
