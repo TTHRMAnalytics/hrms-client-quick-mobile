@@ -11,33 +11,24 @@ import {
   BackHandler,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
-
+import { getUserErrorMessage, handleCriticalError } from "../utils/errorHandler";
 import { colors, spacing } from "../constants/theme";
 import { addFaceData, getEmployeeLastAttendanceStatus, getFaceData } from "../services/api";
-
 import {
   getSessionData,
   saveAttendanceState,
   getAttendanceState
 } from "../services/baseHelper";
-
 import NoInternetModal from "../components/NoInternetModal";
 import NetworkErrorModal from "../components/NetworkErrorModal";
 import { InlineLoader } from "../components/LoadingOverlay";
-
 import {
   getCachedLocation,
   triggerBackgroundRefresh,
 } from "../utils/locationManager";
-
-// ✅ Import NetInfo directly instead of custom hook
 import NetInfo from "@react-native-community/netinfo";
 
 export default function AttendanceScreen({ navigation, route }) {
-  // ============================================
-  // ✅ ALL HOOKS MUST BE AT THE VERY TOP - NO EXCEPTIONS
-  // ============================================
-
   // State hooks
   const [employeeId, setEmployeeId] = useState(null);
   const [lastAction, setLastAction] = useState(null);
@@ -55,17 +46,16 @@ export default function AttendanceScreen({ navigation, route }) {
   // Ref hooks
   const hasInitialized = useRef(false);
 
-  // ✅ Internet status effect (replaces useInternetStatus hook)
+  // Internet status effect
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       const connected = state.isConnected === true && state.isInternetReachable !== false;
       setIsInternetAvailable(connected);
     });
-
     return () => unsubscribe();
   }, []);
 
-  // ✅ Back button handler effect
+  // Back button handler effect
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       "hardwareBackPress",
@@ -74,25 +64,19 @@ export default function AttendanceScreen({ navigation, route }) {
         return true;
       }
     );
-
     return () => backHandler.remove();
   }, []);
 
-  // ✅ Init effect (runs only once)
+  // Init effect (runs only once)
   useEffect(() => {
     if (!hasInitialized.current) {
       hasInitialized.current = true;
       initScreen();
     }
-
     return () => {
       hasInitialized.current = false;
     };
   }, []);
-
-  // ============================================
-  // NOW SAFE TO USE REGULAR VARIABLES AND FUNCTIONS
-  // ============================================
 
   const workspace = route?.params?.workspace || "";
 
@@ -100,26 +84,21 @@ export default function AttendanceScreen({ navigation, route }) {
   const initScreen = async () => {
     try {
       setInitialLoading(true);
-
       const empId =
         (await getSessionData({ key: "employee_id" })) ||
         (await getSessionData({ key: "emp_id" }));
 
       if (!empId) {
-        Alert.alert("Error", "User not found. Please login again.");
+        Alert.alert("Session Error", "Please login again to continue.");
         navigation.goBack();
         return;
       }
 
       setEmployeeId(empId);
-
-      console.log("📂 Loading cached attendance state...");
+      
       const cached = await getAttendanceState({ employeeId: empId });
-
       if (cached && cached.last_action) {
-        console.log("✅ Loaded from cache:", cached);
         setLastAction(cached.last_action);
-
         if (cached.check_in_time) {
           setCheckInTime(buildDisplayDateTime(cached.check_in_time));
         }
@@ -127,12 +106,10 @@ export default function AttendanceScreen({ navigation, route }) {
           setCheckOutTime(buildDisplayDateTime(cached.check_out_time));
         }
       }
-
-      console.log("🔄 Syncing with server...");
+      
       await syncWithServer(empId);
-
     } catch (e) {
-      console.error("❌ Init failed:", e);
+      Alert.alert("Error", "Unable to load attendance data. Please try again.");
     } finally {
       setInitialLoading(false);
     }
@@ -144,16 +121,11 @@ export default function AttendanceScreen({ navigation, route }) {
       const domain =
         (await getSessionData({ key: "domain_name" })) || workspace;
 
-      console.log("🔄 Syncing with server...");
-
-      // ✅ Try getFaceData first (has timestamps)
       let res;
       let useFallback = false;
 
       try {
         const today = new Date().toISOString().split('T')[0];
-
-        console.log("🔄 Trying getFaceData...");
         res = await getFaceData({
           fromDate: today,
           toDate: today,
@@ -161,26 +133,18 @@ export default function AttendanceScreen({ navigation, route }) {
           domainName: domain,
         });
 
-        console.log("🔍 Server Response from getFaceData:", JSON.stringify(res, null, 2));
-
-        // Check if response is valid
         if (res?.statuscode === "500" || res?.status === "failed") {
-          console.log("⚠️ getFaceData failed, using fallback");
           useFallback = true;
         }
       } catch (e) {
-        console.log("⚠️ getFaceData error, using fallback:", e.message);
         useFallback = true;
       }
 
-      // ✅ Fallback to getEmployeeLastAttendanceStatus (no timestamps but works)
       if (useFallback) {
-        console.log("🔄 Using fallback: getEmployeeLastAttendanceStatus");
         res = await getEmployeeLastAttendanceStatus({
           employeeId: empId,
           domainName: domain,
         });
-        console.log("🔍 Server Response (fallback):", JSON.stringify(res, null, 2));
       }
 
       // Parse response based on which API was used
@@ -189,19 +153,24 @@ export default function AttendanceScreen({ navigation, route }) {
       let serverCheckOutTime = null;
 
       if (useFallback) {
-        // Parse getEmployeeLastAttendanceStatus response
         const statusArray = res?.data;
         const status = Array.isArray(statusArray) ? statusArray[0] : statusArray;
 
         serverLastAction =
+          status?.record_type ||
           status?.fn_get_last_attendance_status ||
           status?.last_action ||
           null;
 
-        console.log("📊 Parsed Server Data (fallback):", { serverLastAction });
+        const serverTimestamp = status?.record_timestamp || null;
 
+        if (serverLastAction === "Check In" && serverTimestamp) {
+          serverCheckInTime = serverTimestamp;
+          serverCheckOutTime = null;
+        } else if (serverLastAction === "Check Out" && serverTimestamp) {
+          serverCheckOutTime = serverTimestamp;
+        }
       } else {
-        // Parse getFaceData response
         const attendanceData = res?.data || [];
         const latestRecord = Array.isArray(attendanceData) && attendanceData.length > 0
           ? attendanceData[attendanceData.length - 1]
@@ -213,57 +182,41 @@ export default function AttendanceScreen({ navigation, route }) {
             latestRecord.checkInTime ||
             latestRecord.record_time ||
             null;
-
           serverCheckOutTime =
             latestRecord.check_out_time ||
             latestRecord.checkOutTime ||
             null;
 
-          // Determine action based on timestamps
           if (serverCheckOutTime) {
             serverLastAction = "Check Out";
           } else if (serverCheckInTime) {
             serverLastAction = "Check In";
           }
-
-          console.log("📊 Parsed Server Data (getFaceData):", {
-            serverLastAction,
-            serverCheckInTime,
-            serverCheckOutTime,
-          });
         }
       }
 
-      // Get existing cache
       const existingCache = await getAttendanceState({ employeeId: empId });
-      console.log("📦 Existing Cache:", existingCache);
 
-      // Smart merge
       let finalCheckInTime = serverCheckInTime || existingCache?.check_in_time || null;
       let finalCheckOutTime = serverCheckOutTime || existingCache?.check_out_time || null;
 
-      console.log("🔄 Merge Result:", {
-        finalCheckInTime,
-        finalCheckOutTime,
-        source: serverCheckInTime ? "server" : "cache",
-      });
-
-      // Update state
       setLastAction(serverLastAction);
 
       if (serverLastAction === "Check In") {
         if (finalCheckInTime) {
-          setCheckInTime(buildDisplayDateTime(finalCheckInTime));
+          const displayTime = buildDisplayDateTime(finalCheckInTime);
+          setCheckInTime(displayTime);
         }
         setCheckOutTime(null);
         finalCheckOutTime = null;
-
       } else if (serverLastAction === "Check Out") {
         if (finalCheckOutTime) {
-          setCheckOutTime(buildDisplayDateTime(finalCheckOutTime));
+          const displayTime = buildDisplayDateTime(finalCheckOutTime);
+          setCheckOutTime(displayTime);
         }
         if (finalCheckInTime) {
-          setCheckInTime(buildDisplayDateTime(finalCheckInTime));
+          const displayTime = buildDisplayDateTime(finalCheckInTime);
+          setCheckInTime(displayTime);
         }
       } else {
         if (!existingCache?.last_action) {
@@ -274,24 +227,21 @@ export default function AttendanceScreen({ navigation, route }) {
         }
       }
 
-      // Save to cache
       await saveAttendanceState({
         employeeId: empId,
         lastAction: serverLastAction,
         checkInTime: finalCheckInTime,
         checkOutTime: finalCheckOutTime,
       });
-
-      console.log("✅ Synced with server and updated cache");
-
     } catch (e) {
-      console.error("❌ Server sync failed:", e);
+      // Silent fail - cache will be used
     }
   };
 
   // ---------------- HELPERS ----------------
   const buildDisplayDateTime = (iso) => {
-    const d = new Date(iso);
+    const cleanIso = iso?.replace('Z', '');
+    const d = new Date(cleanIso);
     return {
       time: d.toLocaleTimeString("en-US", {
         hour: "2-digit",
@@ -319,7 +269,6 @@ export default function AttendanceScreen({ navigation, route }) {
     for (let i = 0; i < maxRetries; i++) {
       const cached = await getCachedLocation();
       if (cached) return cached;
-
       triggerBackgroundRefresh();
       await new Promise((res) => setTimeout(res, delayMs));
     }
@@ -335,12 +284,12 @@ export default function AttendanceScreen({ navigation, route }) {
       }
 
       setLoading(true);
-
       const cached = await waitForLocation();
+
       if (!cached) {
         Alert.alert(
-          "Unable to get location",
-          "Please ensure location is enabled and try again."
+          "Location Required",
+          "Unable to get your location. Please enable location services and try again."
         );
         return null;
       }
@@ -348,12 +297,8 @@ export default function AttendanceScreen({ navigation, route }) {
       const gps = `${cached.latitude},${cached.longitude}`;
       const domain =
         (await getSessionData({ key: "domain_name" })) || workspace;
-
       const recordTime = getLocalISOTime();
 
-      console.log(`📤 Sending ${type} to server...`);
-
-      // ✅ Log the exact payload being sent
       const payload = {
         employeeId,
         recordTime,
@@ -362,92 +307,101 @@ export default function AttendanceScreen({ navigation, route }) {
         userId: employeeId,
         liveLocation: gps,
       };
-      console.log("📦 Payload:", JSON.stringify(payload, null, 2));
 
       const res = await addFaceData(payload);
 
-      console.log(`✅ ${type} successful!`);
-      console.log("📥 Server Response:", JSON.stringify(res, null, 2));
-
+      const responseData = res?.data?.[0] || res?.data || {};
+      const serverCheckIn =
+        responseData.last_check_in ||
+        responseData.check_in_time ||
+        responseData.checkInTime ||
+        null;
+      const serverCheckOut =
+        responseData.last_check_out ||
+        responseData.check_out_time ||
+        responseData.checkOutTime ||
+        null;
       const returnedTime = res?.data?.record_time || res?.record_time || recordTime;
-      console.log("⏰ Using timestamp:", returnedTime);
 
-      return returnedTime;
+      return {
+        timestamp: returnedTime,
+        serverCheckIn,
+        serverCheckOut,
+      };
     } catch (e) {
-      console.error(`❌ ${type} failed:`, e);
+      // Handle critical errors (session expiry)
+      const handled = await handleCriticalError(e, navigation);
+      if (handled) return null;
 
+      // Show user-friendly errors only
       if (e.message === "Network request failed") {
         setShowNetworkErrorModal(true);
         return null;
       }
 
-      Alert.alert("Error", e.message || "Attendance failed");
+      Alert.alert("Attendance Error", "Unable to record attendance. Please try again.");
       return null;
+
     } finally {
       setLoading(false);
     }
   };
 
-
   // ---------------- HANDLERS ----------------
   const handleCheckIn = async () => {
-    console.log("🟢 CHECK IN button pressed");
-
     setLastActionType("Check In");
-    const iso = await sendAttendance("Check In");
-
-    if (!iso) {
-      console.log("❌ Check In failed");
+    const result = await sendAttendance("Check In");
+    if (!result) {
       return;
     }
 
+    const iso = result.serverCheckIn || result.timestamp;
     const displayTime = buildDisplayDateTime(iso);
     setCheckInTime(displayTime);
     setCheckOutTime(null);
     setLastAction("Check In");
-
-    // ✅ Save with actual ISO timestamp
     await saveAttendanceState({
       employeeId,
       lastAction: "Check In",
-      checkInTime: iso, // ✅ This is the ISO string
+      checkInTime: iso,
       checkOutTime: null,
     });
-
-    console.log("✅ Check In completed at", displayTime.time);
     setShowCheckInModal(true);
   };
 
   const handleCheckOut = async () => {
-    console.log("🔴 CHECK OUT button pressed");
-
     setLastActionType("Check Out");
-    const iso = await sendAttendance("Check Out");
-
-    if (!iso) {
-      console.log("❌ Check Out failed");
+    const result = await sendAttendance("Check Out");
+    if (!result) {
       return;
     }
 
-    const displayTime = buildDisplayDateTime(iso);
+    const checkInISO = result.serverCheckIn;
+    const checkOutISO = result.serverCheckOut || result.timestamp;
+    const displayTime = buildDisplayDateTime(checkOutISO);
     setCheckOutTime(displayTime);
     setLastAction("Check Out");
 
-    // ✅ Get existing cache to preserve check-in time
+    if (checkInISO) {
+      setCheckInTime(buildDisplayDateTime(checkInISO));
+    } else {
+      const existingCache = await getAttendanceState({ employeeId });
+      if (existingCache?.check_in_time) {
+        setCheckInTime(buildDisplayDateTime(existingCache.check_in_time));
+      }
+    }
+
     const existingCache = await getAttendanceState({ employeeId });
-    const checkInISO = existingCache?.check_in_time || new Date().toISOString();
+    const finalCheckInISO = checkInISO || existingCache?.check_in_time;
 
     await saveAttendanceState({
       employeeId,
       lastAction: "Check Out",
-      checkInTime: checkInISO, // ✅ Preserve check-in time
-      checkOutTime: iso, // ✅ New check-out time
+      checkInTime: finalCheckInISO,
+      checkOutTime: checkOutISO,
     });
-
-    console.log("✅ Check Out completed at", displayTime.time);
     setShowCheckOutModal(true);
   };
-
 
   const retryLastAction = async () => {
     if (!lastActionType) {
@@ -455,9 +409,7 @@ export default function AttendanceScreen({ navigation, route }) {
       return;
     }
 
-    console.log(`🔄 Retrying ${lastActionType}...`);
     setShowNetworkErrorModal(false);
-
     if (lastActionType === "Check In") {
       await handleCheckIn();
     } else {
@@ -529,10 +481,7 @@ export default function AttendanceScreen({ navigation, route }) {
 
         <View style={styles.buttonsContainer}>
           <TouchableOpacity
-            style={[
-              styles.checkInButton,
-              isCheckInDisabled && { opacity: 0.4 },
-            ]}
+            style={[styles.checkInButton, isCheckInDisabled && { opacity: 0.4 }]}
             onPress={handleCheckIn}
             disabled={isCheckInDisabled}
           >
@@ -540,10 +489,7 @@ export default function AttendanceScreen({ navigation, route }) {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[
-              styles.checkOutButton,
-              isCheckOutDisabled && { opacity: 0.4 },
-            ]}
+            style={[styles.checkOutButton, isCheckOutDisabled && { opacity: 0.4 }]}
             onPress={handleCheckOut}
             disabled={isCheckOutDisabled}
           >
@@ -567,31 +513,21 @@ export default function AttendanceScreen({ navigation, route }) {
       />
 
       <Modal visible={showCheckInModal} transparent animationType="fade">
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setShowCheckInModal(false)}
-        >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowCheckInModal(false)}>
           <Pressable style={styles.modalCard}>
             <Icon name="checkmark-circle" size={60} color={colors.accent} />
             <Text style={styles.modalTitle}>Check In Confirmed!</Text>
-            <Text style={styles.modalMessage}>
-              You checked in at {checkInTime?.time}
-            </Text>
+            <Text style={styles.modalMessage}>You checked in at {checkInTime?.time}</Text>
           </Pressable>
         </Pressable>
       </Modal>
 
       <Modal visible={showCheckOutModal} transparent animationType="fade">
-        <Pressable
-          style={styles.modalBackdrop}
-          onPress={() => setShowCheckOutModal(false)}
-        >
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowCheckOutModal(false)}>
           <Pressable style={styles.modalCard}>
             <Icon name="checkmark-circle" size={60} color={colors.accent} />
             <Text style={styles.modalTitle}>Check Out Confirmed!</Text>
-            <Text style={styles.modalMessage}>
-              You checked out at {checkOutTime?.time}
-            </Text>
+            <Text style={styles.modalMessage}>You checked out at {checkOutTime?.time}</Text>
           </Pressable>
         </Pressable>
       </Modal>

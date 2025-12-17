@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { colors, spacing } from "../constants/theme";
+import MeeplLogo from "../components/MeeplLogo";
 import CustomInput from "../components/CustomInput";
 import CustomButton from "../components/CustomButton";
 import CustomToast from "../components/CustomToast";
@@ -21,6 +22,7 @@ import NetworkErrorModal from "../components/NetworkErrorModal";      //  added
 import useInternetStatus from "../hooks/useInternetStatus";           //  added
 import { signIn, getuserinfo } from "../services/api";
 import { addSessionData, getSessionData } from "../services/baseHelper";
+import { getUserErrorMessage, handleCriticalError } from "../utils/errorHandler";
 
 export default function PasswordScreen({ navigation, route }) {
   useHardwareBack(navigation);
@@ -56,59 +58,37 @@ export default function PasswordScreen({ navigation, route }) {
 
   const handleSignIn = async () => {
     if (!password.trim()) {
-      setToast({
-        visible: true,
-        message: "Please enter your password.",
-        type: "error",
-      });
+      setToast({ visible: true, message: "Please enter your password.", type: "error" });
       return;
     }
 
-    if (!isInternetAvailable) {                                       //  offline -> modal
+    if (!isInternetAvailable) {
       setShowNoInternetModal(true);
       return;
     }
 
     try {
       setLoading(true);
-      const result = await signIn({
-        userId: email,
-        domain: workspace,
-        password,
-      });
+      const result = await signIn({ userId: email, domain: workspace, password });
 
       let companyName = "";
       let employeeName = "";
 
-      // Store user data in AsyncStorage
       if (result && result.data) {
-        // Extract the NUMERIC userid from API response
         const numericUserId = result.data.userid || result.data.user_id || result.data.id;
 
-        // Make sure numericUserId is defined before calling getuserinfo
         if (numericUserId) {
           try {
-            const userinfo = await getuserinfo({
-              userId: numericUserId,
-              domain: workspace,
-            });
-
-            // userinfo.data may be an array of users or an object
+            const userinfo = await getuserinfo({ userId: numericUserId, domain: workspace });
             const resUserData = Array.isArray(userinfo?.data) ? userinfo.data[0] : userinfo?.data;
+
             const employeeId = resUserData?.employee_id || numericUserId;
-            employeeName =
-              (resUserData &&(resUserData.employee_name || resUserData.full_name || resUserData.emp_name || resUserData.name)) ||
-              userinfo?.data?.employee_name ||
-              "";
+            employeeName = (resUserData && (resUserData.employee_name || resUserData.full_name || resUserData.emp_name || resUserData.name)) || "";
+            companyName = (resUserData && (resUserData.company_full_name || resUserData.company_name || resUserData.company)) || "";
 
-            companyName =
-              (resUserData && (resUserData.company_full_name || resUserData.company_name || resUserData.company)) ||
-              userinfo?.data?.company_full_name ||
-              "";
-
-            // Store all necessary data with CORRECT user_id
-            await addSessionData({ key: "user_id", value: String(numericUserId) }); // Store numeric user_id
-            await addSessionData({ key: "userId", value: String(numericUserId) }); // Also store as userId
+            // Store session data
+            await addSessionData({ key: "user_id", value: String(numericUserId) });
+            await addSessionData({ key: "userId", value: String(numericUserId) });
             await addSessionData({ key: "employee_id", value: String(employeeId) });
             await addSessionData({ key: "emp_id", value: String(employeeId) });
             await addSessionData({ key: "domain_name", value: workspace });
@@ -119,49 +99,41 @@ export default function PasswordScreen({ navigation, route }) {
             await addSessionData({ key: "employee_name", value: String(employeeName || "") });
 
           } catch (infoErr) {
-            // If getuserinfo fails, still store minimal data and continue
-            console.warn("getuserinfo failed:", infoErr);
-            await addSessionData({ key: "user_id", value: String(result.data.userid || result.data.user_id || "") });
-            await addSessionData({ key: "userId", value: String(result.data.userid || result.data.user_id || "") });
+            await addSessionData({ key: "user_id", value: String(numericUserId) });
+            await addSessionData({ key: "userId", value: String(numericUserId) });
             await addSessionData({ key: "domain_name", value: workspace });
             await addSessionData({ key: "user_email", value: email });
             await addSessionData({ key: "company_id", value: "" });
           }
         } else {
-          // fallback: result.data exists but no numeric id
+          // Fallback
           const fallbackId = email.split('@')[0];
           await addSessionData({ key: 'user_id', value: fallbackId });
           await addSessionData({ key: 'userId', value: fallbackId });
           await addSessionData({ key: 'employee_id', value: fallbackId });
           await addSessionData({ key: 'domain_name', value: workspace });
           await addSessionData({ key: 'user_email', value: email });
-          await addSessionData({ key: 'company_id', value: "" });
         }
-      } else {
-        console.warn("  No data in login response, using email as fallback");
-        const fallbackId = email.split('@')[0];
-        await addSessionData({ key: 'user_id', value: fallbackId });
-        await addSessionData({ key: 'userId', value: fallbackId });
-        await addSessionData({ key: 'employee_id', value: fallbackId });
-        await addSessionData({ key: 'domain_name', value: workspace });
-        await addSessionData({ key: 'user_email', value: email });
-        await addSessionData({ key: 'company_id', value: "" });
       }
 
-      // Navigate to Home and pass company name so HomeScreen can render it immediately
+      // Navigate to Home
       navigation.reset({
         index: 0,
         routes: [{ name: "Home", params: { email, workspace, company: companyName, employee_name: employeeName } }],
       });
+
     } catch (err) {
-      console.error("  Login error:", err);
-      if (err?.message === "Network request failed") {               //  network failure -> modal
+      const handled = await handleCriticalError(err, navigation);
+      if (handled) return;
+
+      if (err?.message === "Network request failed") {
         setShowNetworkErrorModal(true);
       } else {
+        // Generic password error - don't reveal technical details
         setToast({
           visible: true,
-          message: "Password is invalid",
-          type: "error",
+          message: "Incorrect password. Please try again.",
+          type: "error"
         });
       }
     } finally {
@@ -169,15 +141,12 @@ export default function PasswordScreen({ navigation, route }) {
     }
   };
 
+
   return (
     <SafeAreaView style={styles.root}>
       {/* Logo */}
-      <View style={styles.header}>
-        <Image
-          source={require("../assets/logo.png")}
-          style={styles.headerLogo}
-          resizeMode="contain"
-        />
+      <View style={styles.logoContainer}>
+        <MeeplLogo width={64} height={64} />
         <Text style={styles.appName}>MEEPL</Text>
       </View>
 
@@ -281,10 +250,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.md,
   },
-  headerLogo: {
-    width: 64,
-    height: 64,
-    marginBottom: 6,
+  logoContainer: {
+    alignItems: "center",
+    gap: 10,
+    marginBottom: spacing.xl,  // This adds space below
   },
   appName: {
     color: "#fff",
@@ -292,6 +261,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 2,
   },
+
   backButton: {
     position: "absolute",
     left: 22,

@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { colors, spacing } from "../constants/theme";
+import MeeplLogo from "../components/MeeplLogo";
 import CustomInput from "../components/CustomInput";
 import CustomButton from "../components/CustomButton";
 import CustomToast from "../components/CustomToast";
@@ -22,6 +23,7 @@ import NetworkErrorModal from "../components/NetworkErrorModal";
 import LocationDisabledModal from "../components/LocationDisabledModal";
 import useInternetStatus from "../hooks/useInternetStatus";
 import { startBackgroundLocation } from "../utils/locationManager";
+import { getUserErrorMessage, isValidEmail } from "../utils/errorHandler";
 
 export default function EmailScreen({ navigation }) {
   useHardwareBack(navigation);
@@ -57,36 +59,29 @@ export default function EmailScreen({ navigation }) {
 
   const handleContinue = async () => {
     const trimmed = email.trim();
-    await addSessionData({
-      key: "saved_email",
-      value: trimmed.toLowerCase(),
-    });
-
     if (!trimmed) {
-      showToast("Please enter your email.");
+      showToast("Please enter your email address.");
       return;
     }
-
+    if (!isValidEmail(trimmed)) {
+      showToast("Please enter a valid email address.");
+      return;
+    }
     try {
       setLoading(true);
+      await addSessionData({
+        key: "saved_email",
+        value: trimmed.toLowerCase(),
+      });
       const workspaces = await getWorkspaces(trimmed);
-
-      if (!workspaces.length) {
-        showToast("No workspace found for this email.");
+      if (!workspaces || workspaces.length === 0) {
+        showToast("No workspace found for this email. Please check and try again.");
         return;
       }
-
-      navigation.navigate("Workspace", {
-        email: trimmed,
-        workspaces,
-      });
+      navigation.navigate("Workspace", { email: trimmed, workspaces });
     } catch (err) {
-      console.error(err);
-      const msg =
-        err?.message && typeof err.message === "string"
-          ? err.message
-          : "Unable to fetch workspaces. Please try again.";
-      showToast(msg);
+      const userMessage = getUserErrorMessage(err, 'email');
+      showToast(userMessage);
     } finally {
       setLoading(false);
     }
@@ -95,12 +90,8 @@ export default function EmailScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.root}>
       {/* Top logo + Meepl */}
-      <View style={styles.header}>
-        <Image
-          source={require("../assets/logo.png")}
-          style={styles.headerLogo}
-          resizeMode="contain"
-        />
+      <View style={styles.logoContainer}>
+        <MeeplLogo width={64} height={64} />
         <Text style={styles.appName}>MEEPL</Text>
       </View>
 
@@ -179,17 +170,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.md,
   },
-  headerLogo: {
-    width: 64,
-    height: 64,
-    marginBottom: 8,
+  logoContainer: {
+    alignItems: "center",
+    gap: 10,
+    marginBottom: spacing.xl,  // This adds space below
   },
   appName: {
-    color: "#ffffff",
+    color: "#fff",
     fontSize: 26,
     fontWeight: "800",
     letterSpacing: 2,
   },
+
   card: {
     width: "88%",
     backgroundColor: "#111111",

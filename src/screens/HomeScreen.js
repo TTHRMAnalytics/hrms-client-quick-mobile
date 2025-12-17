@@ -5,15 +5,14 @@ import {
   Text,
   View,
   TouchableOpacity,
-  Image,
   BackHandler,
-  ToastAndroid,
   Platform,
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { colors, spacing } from "../constants/theme";
 import ConfirmLogoutModal from "../components/ConfirmLogoutModal";
 import { clearSessionData, getSessionData } from "../services/baseHelper";
+import MeeplLogo from "../components/MeeplLogo";
 
 export default function HomeScreen({ navigation, route }) {
   const [email, setEmail] = useState("");
@@ -55,17 +54,17 @@ export default function HomeScreen({ navigation, route }) {
   useEffect(() => {
     const backAction = () => {
       if (Platform.OS !== "android") {
-        return false; // let default iOS behavior work
+        return false;
       }
 
       const now = Date.now();
+
       if (lastBackPress && now - lastBackPress < 2000) {
-        BackHandler.exitApp();
+        setShowLogoutModal(true);
         return true;
       }
 
       setLastBackPress(now);
-      ToastAndroid.show("Press back again to exit", ToastAndroid.SHORT);
       return true;
     };
 
@@ -77,33 +76,26 @@ export default function HomeScreen({ navigation, route }) {
     return () => backHandler.remove();
   }, [lastBackPress]);
 
-  /* ---------- logout ---------- */
   const handleLogout = async () => {
     try {
       await clearSessionData();
-    } catch (e) {
-      console.warn("clearSessionData error", e);
-    }
+    } catch (e) {}
 
     setShowLogoutModal(false);
+    setLastBackPress(0);
+
     navigation.reset({
       index: 0,
       routes: [{ name: "Welcome" }],
     });
   };
 
-  /* ---------- UI ---------- */
   return (
     <SafeAreaView style={styles.root}>
-      {/* Header */}
       <View style={styles.headerContainer}>
         <View style={styles.header}>
-          <Image
-            source={require("../assets/logo.png")}
-            style={styles.headerLogo}
-            resizeMode="contain"
-          />
-          <Text style={styles.appName}>Meepl</Text>
+          <MeeplLogo width={64} height={64} />
+          <Text style={styles.appName}>MEEPL</Text>
         </View>
 
         <TouchableOpacity
@@ -111,35 +103,33 @@ export default function HomeScreen({ navigation, route }) {
           onPress={() => setShowLogoutModal(true)}
           activeOpacity={0.7}
         >
-          <Icon name="log-out-outline" size={26} color={colors.accent} />
+          <Icon name="log-out-outline" size={24} color={colors.accent} />
         </TouchableOpacity>
       </View>
 
-      {/* Welcome Card */}
       <View style={styles.welcomeCard}>
         <Text style={styles.welcomeText}>Welcome Back!</Text>
 
         {employeeName ? (
           <View style={styles.companyRow}>
-            <Icon name="person-circle-outline" size={18} color="#aaa" />
-            <Text style={styles.companyText}>{employeeName}</Text>
+            <Icon name="person" size={18} color="#888" />
+            <Text style={styles.userText}>{employeeName}</Text>
           </View>
         ) : null}
 
         {company ? (
           <View style={styles.companyRow}>
-            <Icon name="business-outline" size={18} color="#aaa" />
+            <Icon name="business" size={18} color="#888" />
             <Text style={styles.companyText}>{company}</Text>
           </View>
         ) : null}
 
         <View style={styles.companyRow}>
-          <Icon name="mail-outline" size={18} color="#aaa" />
+          <Icon name="mail" size={18} color="#888" />
           <Text style={styles.userText}>{email}</Text>
         </View>
       </View>
 
-      {/* Attendance Card */}
       <View style={styles.centerContainer}>
         <TouchableOpacity
           style={styles.attendanceCard}
@@ -154,17 +144,18 @@ export default function HomeScreen({ navigation, route }) {
         </TouchableOpacity>
       </View>
 
-      {/* Logout Modal */}
       <ConfirmLogoutModal
         visible={showLogoutModal}
-        onCancel={() => setShowLogoutModal(false)}
+        onCancel={() => {
+          setShowLogoutModal(false);
+          setLastBackPress(0);
+        }}
         onConfirm={handleLogout}
       />
     </SafeAreaView>
   );
 }
 
-/* ---------- styles ---------- */
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -178,11 +169,7 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: "center",
-  },
-  headerLogo: {
-    width: 50,
-    height: 50,
-    marginBottom: 8,
+    gap: 8,
   },
   appName: {
     color: "#ffffff",

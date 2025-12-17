@@ -13,6 +13,7 @@ import {
 import Icon from "react-native-vector-icons/Ionicons";          //  already used elsewhere in project
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { colors, spacing } from "../constants/theme";
+import MeeplLogo from "../components/MeeplLogo";
 import ConfirmSwitchAccountModal from "../components/ConfirmSwitchAccountModal";
 import NoInternetModal from "../components/NoInternetModal";
 import NetworkErrorModal from "../components/NetworkErrorModal";
@@ -92,12 +93,8 @@ export default function WelcomeScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.root}>
       {/* Logo */}
-      <View style={styles.header}>
-        <Image
-          source={require("../assets/logo.png")}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+      <View style={styles.logoContainer}>
+        <MeeplLogo width={64} height={64} />
         <Text style={styles.appName}>MEEPL</Text>
       </View>
 
@@ -177,10 +174,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.md,
   },
-  logo: {
-    width: 64,
-    height: 64,
-    marginBottom: 8,
+  logoContainer: {
+    alignItems: "center",
+    gap: 10,
+    marginBottom: spacing.xl,  // This adds space below
   },
   appName: {
     color: "#fff",
@@ -188,6 +185,7 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 2,
   },
+
   card: {
     width: "88%",
     backgroundColor: "#111",
@@ -206,7 +204,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: spacing.lg,
   },
-  // ❌ removed grey emailBox; replaced with simple row
   emailRow: {
     flexDirection: "row",
     alignItems: "center",

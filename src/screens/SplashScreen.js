@@ -3,6 +3,7 @@
 import React, { useEffect } from "react";
 import { View, Image, Text, StyleSheet, StatusBar } from "react-native";
 import { getSessionData } from "../services/baseHelper";
+import MeeplLogo from "../components/MeeplLogo";
 
 export default function SplashScreen({ navigation }) {
   useEffect(() => {
@@ -30,11 +31,7 @@ export default function SplashScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#000" />
-      <Image
-        source={require("../assets/logo.png")}
-        style={styles.logo}
-        resizeMode="contain"
-      />
+      <MeeplLogo width={80} height={80} />
       <Text style={styles.appName}>MEEPL</Text>
     </View>
   );

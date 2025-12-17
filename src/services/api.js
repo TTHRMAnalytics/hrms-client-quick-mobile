@@ -45,19 +45,24 @@ async function request(path, options = {}, retry = true) {
       if (retryRes.status === 401 || retryRes.status === 403) {
         throw new Error("SESSION_EXPIRED");
       }
-      throw new Error(retryText || `HTTP ${retryRes.status}`);
+      throw new Error("SERVICE_ERROR");
     }
 
     return retryJson;
   }
 
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("SESSION_EXPIRED");
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("SESSION_EXPIRED");
+      }
+      if (response.status >= 500) {
+        throw new Error("SERVER_ERROR");
+      }
+      if (response.status === 404) {
+        throw new Error("NOT_FOUND");
+      }
+      throw new Error("SERVICE_ERROR");
     }
-    throw new Error(text || `HTTP ${response.status}`);
-  }
-
 
   return json;
 }
@@ -150,19 +155,24 @@ async function lmsRequest(path, options = {}, retry = true) {
       if (retryRes.status === 401 || retryRes.status === 403) {
         throw new Error("SESSION_EXPIRED");
       }
-      throw new Error(retryText || `HTTP ${retryRes.status}`);
+      throw new Error("SERVICE_ERROR");
     }
 
     return retryJson;
   }
 
-  if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
-      throw new Error("SESSION_EXPIRED");
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error("SESSION_EXPIRED");
+      }
+      if (response.status >= 500) {
+        throw new Error("SERVER_ERROR");
+      }
+      if (response.status === 404) {
+        throw new Error("NOT_FOUND");
+      }
+      throw new Error("SERVICE_ERROR");
     }
-    throw new Error(text || `HTTP ${response.status}`);
-  }
-
 
   return json;
 }
@@ -185,28 +195,6 @@ export async function addFaceData({ employeeId, recordTime, entryType, domainNam
 
   return res;
 }
-
-export function getErrorMessage(error) {
-  if (!error) return "Something went wrong";
-
-  if (error.message === "SESSION_EXPIRED") {
-    return "Your session expired. Please login again.";
-  }
-
-  if (error.message === "Network request failed") {
-    return "No internet connection";
-  }
-
-  if (error.message?.includes("HTTP 500")) {
-    return "Server error. Please try later.";
-  }
-
-  return "Service temporarily unavailable";
-}
-
-
-
-
 
 // Get face data (attendance history)
 export async function getFaceData({ fromDate, toDate, empId, domainName }) {

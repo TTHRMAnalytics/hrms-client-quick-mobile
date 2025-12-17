@@ -39,7 +39,7 @@ export default function NetworkErrorModal({ visible, onRetry, onGoHome }) {
               onPress={onGoHome}
               activeOpacity={0.8}
             >
-              <Text style={styles.homeText}>GO HOME</Text>
+              <Text style={styles.homeText}>GO BACK</Text>
             </TouchableOpacity>
 
             <TouchableOpacity

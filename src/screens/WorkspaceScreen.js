@@ -12,14 +12,17 @@ import {
 } from "react-native";
 import Icon from "react-native-vector-icons/Ionicons";
 import { colors, spacing } from "../constants/theme";
+import MeeplLogo from "../components/MeeplLogo";
 import CustomButton from "../components/CustomButton";
 import CustomToast from "../components/CustomToast";
 import LoadingOverlay from "../components/LoadingOverlay";
-import NoInternetModal from "../components/NoInternetModal";          // ✅ added
-import NetworkErrorModal from "../components/NetworkErrorModal";      // ✅ added
-import useInternetStatus from "../hooks/useInternetStatus";           // ✅ added
+import NoInternetModal from "../components/NoInternetModal";
+import NetworkErrorModal from "../components/NetworkErrorModal";
+import useInternetStatus from "../hooks/useInternetStatus";
 import { getSessionData } from "../services/baseHelper";
-import { getWorkspaces, getErrorMessage } from "../services/api";     // ✅ getErrorMessage
+import { getWorkspaces } from "../services/api";
+import { getUserErrorMessage, handleCriticalError } from "../utils/errorHandler";
+
 
 /* ---------- helper ---------- */
 function getWorkspaceName(item) {
@@ -49,9 +52,9 @@ export default function WorkspaceScreen({ navigation }) {
     type: "error",
   });
 
-  const isInternetAvailable = useInternetStatus();                    // ✅ added
-  const [showNoInternetModal, setShowNoInternetModal] = useState(false);   // ✅ added
-  const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false); // ✅ added
+  const isInternetAvailable = useInternetStatus();
+  const [showNoInternetModal, setShowNoInternetModal] = useState(false);
+  const [showNetworkErrorModal, setShowNetworkErrorModal] = useState(false);
 
   /* ---------- load email + workspaces ---------- */
   useEffect(() => {
@@ -69,37 +72,50 @@ export default function WorkspaceScreen({ navigation }) {
 
       setEmail(savedEmail);
       fetchWorkspaces(savedEmail);
-    } catch (e) {
-      showToast(getErrorMessage(e));
-    }
+      } catch (e) {
+        showToast(getUserErrorMessage(e, 'workspace'));
+      }
+
   };
 
   const fetchWorkspaces = async (email) => {
     try {
-      if (!isInternetAvailable) {                                    // ✅ offline -> show modal
+      if (!isInternetAvailable) {
         setShowNoInternetModal(true);
         return;
       }
 
       setLoading(true);
       const res = await getWorkspaces(email);
-
       const list = Array.isArray(res) ? res : [];
+
       setWorkspaces(list);
+
+      if (list.length === 0) {
+        showToast("No workspace found for this email. Please check and try again.");
+        return;
+      }
 
       if (list.length > 0) {
         setSelected(getWorkspaceName(list[0]));
       }
+
     } catch (e) {
-      if (e?.message === "Network request failed") {                 // ✅ network failure -> modal
+      const handled = await handleCriticalError(e, navigation);
+      if (handled) return;
+
+      if (e?.message === "Network request failed") {
         setShowNetworkErrorModal(true);
         return;
       }
-      showToast(getErrorMessage(e));
+
+      showToast("Unable to fetch workspaces. Please try again.");
+
     } finally {
       setLoading(false);
     }
   };
+
 
   const showToast = (message, type = "error") => {
     setToast({ visible: true, message, type });
@@ -121,12 +137,8 @@ export default function WorkspaceScreen({ navigation }) {
     <SafeAreaView style={styles.root}>
       <LoadingOverlay visible={loading} />
       {/* Header */}
-      <View style={styles.header}>
-        <Image
-          source={require("../assets/logo.png")}
-          style={styles.headerLogo}
-          resizeMode="contain"
-        />
+      <View style={styles.logoContainer}>
+        <MeeplLogo width={64} height={64} />
         <Text style={styles.appName}>MEEPL</Text>
       </View>
 
@@ -187,7 +199,6 @@ export default function WorkspaceScreen({ navigation }) {
         onHide={() => setToast((t) => ({ ...t, visible: false }))}
       />
 
-      {/* ✅ No Internet Modal */}
       <NoInternetModal
         visible={showNoInternetModal}
         onRetry={() => {
@@ -196,7 +207,6 @@ export default function WorkspaceScreen({ navigation }) {
         }}
       />
 
-      {/* ✅ Network Error Modal */}
       <NetworkErrorModal
         visible={showNetworkErrorModal}
         onRetry={() => {
@@ -224,17 +234,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.md,
   },
-  headerLogo: {
-    width: 64,
-    height: 64,
-    marginBottom: 8,
+  logoContainer: {
+    alignItems: "center",
+    gap: 10,
+    marginBottom: spacing.xl,  // This adds space below
   },
   appName: {
     color: "#fff",
     fontSize: 26,
     fontWeight: "800",
-    letterSpacing: 4,
+    letterSpacing: 2,
   },
+
   backButton: {
     position: "absolute",
     left: 24,

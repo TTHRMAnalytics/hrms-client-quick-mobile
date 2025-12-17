@@ -1,18 +1,13 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-
 export const addSessionData = async ({ key, value }) => {
   await AsyncStorage.setItem(key, value);
 };
-
 export const getSessionData = async ({ key }) => {
   return await AsyncStorage.getItem(key);
 };
-
 export const removeSessionData = async ({ key }) => {
   await AsyncStorage.removeItem(key);
 };
-
-// ✅ NEW: Attendance state caching functions
 export const saveAttendanceState = async ({ employeeId, lastAction, checkInTime, checkOutTime }) => {
   try {
     const key = `attendance_state_${employeeId}`;
@@ -23,7 +18,6 @@ export const saveAttendanceState = async ({ employeeId, lastAction, checkInTime,
       cached_at: new Date().toISOString(),
     });
     await AsyncStorage.setItem(key, data);
-    console.log("💾 Attendance state cached:", data);
   } catch (e) {
     console.warn("Failed to cache attendance state", e);
   }
@@ -35,7 +29,6 @@ export const getAttendanceState = async ({ employeeId }) => {
     const data = await AsyncStorage.getItem(key);
     if (data) {
       const parsed = JSON.parse(data);
-      console.log("📂 Loaded cached attendance state:", parsed);
       return parsed;
     }
     return null;
@@ -58,7 +51,6 @@ export const clearSessionData = async () => {
     "emp_id",
     "domain_name",
     "user_email",
-    "saved_email",
     "company_id",
     "user_type",
     "employee_name",
@@ -70,5 +62,4 @@ export const clearSessionData = async () => {
 
   // Combine and remove all
   await AsyncStorage.multiRemove([...sessionKeys, ...attendanceKeys]);
-  console.log("🗑️ Cleared all session data and attendance cache");
 };
